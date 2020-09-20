@@ -38,17 +38,7 @@
               class="filter-item"
               @keyup.enter.native="crud.toQuery"
             />
-            <el-date-picker
-              v-model="query.createTime"
-              :default-time="['00:00:00','23:59:59']"
-              type="daterange"
-              range-separator=":"
-              size="small"
-              class="date-item"
-              value-format="yyyy-MM-dd HH:mm:ss"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
-            />
+            <date-range-picker v-model="query.createTime" class="date-item" />
             <el-select
               v-model="query.enabled"
               clearable
@@ -95,7 +85,7 @@
             </el-form-item>
             <el-form-item label="岗位" prop="jobs">
               <el-select
-                v-model="form.jobs"
+                v-model="jobDatas"
                 style="width: 178px"
                 multiple
                 placeholder="请选择"
@@ -127,7 +117,7 @@
             </el-form-item>
             <el-form-item style="margin-bottom: 0;" label="角色" prop="roles">
               <el-select
-                v-model="form.roles"
+                v-model="roleDatas"
                 style="width: 437px"
                 multiple
                 placeholder="请选择"
@@ -212,6 +202,7 @@ import rrOperation from '@crud/RR.operation'
 import crudOperation from '@crud/CRUD.operation'
 import udOperation from '@crud/UD.operation'
 import pagination from '@crud/Pagination'
+import DateRangePicker from '@/components/DateRangePicker'
 import Treeselect from '@riophae/vue-treeselect'
 import { mapGetters } from 'vuex'
 import '@riophae/vue-treeselect/dist/vue-treeselect.css'
@@ -221,7 +212,7 @@ let userJobs = []
 const defaultForm = { id: null, username: null, nickName: null, gender: '男', email: null, enabled: 'false', roles: [], jobs: [], dept: { id: null }, phone: null }
 export default {
   name: 'User',
-  components: { Treeselect, crudOperation, rrOperation, udOperation, pagination },
+  components: { Treeselect, crudOperation, rrOperation, udOperation, pagination, DateRangePicker },
   cruds() {
     return CRUD({ title: '用户', url: 'api/users', crudMethod: { ...crudUser }})
   },
@@ -242,6 +233,7 @@ export default {
     return {
       height: document.documentElement.clientHeight - 180 + 'px;',
       deptName: '', depts: [], deptDatas: [], jobs: [], level: 3, roles: [],
+      jobDatas: [], roleDatas: [], // 多选时使用
       defaultProps: { children: 'children', label: 'name', isLeaf: 'leaf' },
       permission: {
         add: ['admin', 'user:add'],
@@ -300,25 +292,6 @@ export default {
         userJobs.push(job)
       })
     },
-    [CRUD.HOOK.afterAddError](crud) {
-      this.afterErrorMethod(crud)
-    },
-    [CRUD.HOOK.afterEditError](crud) {
-      this.afterErrorMethod(crud)
-    },
-    afterErrorMethod(crud) {
-      // 恢复select
-      const initRoles = []
-      const initJobs = []
-      userRoles.forEach(function(role, index) {
-        initRoles.push(role.id)
-      })
-      userJobs.forEach(function(job, index) {
-        initJobs.push(job.id)
-      })
-      crud.form.roles = initRoles
-      crud.form.jobs = initJobs
-    },
     deleteTag(value) {
       userRoles.forEach(function(data, index) {
         if (data.id === value) {
@@ -338,27 +311,29 @@ export default {
       this.getJobs()
       form.enabled = form.enabled.toString()
     },
-    // 打开编辑弹窗前做的操作
+    // 新增前将多选的值设置为空
+    [CRUD.HOOK.beforeToAdd]() {
+      this.jobDatas = []
+      this.roleDatas = []
+    },
+    // 初始化编辑时候的角色与岗位
     [CRUD.HOOK.beforeToEdit](crud, form) {
       this.getJobs(this.form.dept.id)
+      this.jobDatas = []
+      this.roleDatas = []
       userRoles = []
       userJobs = []
-      const roles = []
-      const jobs = []
+      const _this = this
       form.roles.forEach(function(role, index) {
-        roles.push(role.id)
-        // 初始化编辑时候的角色
+        _this.roleDatas.push(role.id)
         const rol = { id: role.id }
         userRoles.push(rol)
       })
       form.jobs.forEach(function(job, index) {
-        jobs.push(job.id)
-        // 初始化编辑时候的岗位
+        _this.jobDatas.push(job.id)
         const data = { id: job.id }
         userJobs.push(data)
       })
-      form.roles = roles
-      form.jobs = jobs
     },
     // 提交前做的操作
     [CRUD.HOOK.afterValidateCU](crud) {
@@ -368,13 +343,13 @@ export default {
           type: 'warning'
         })
         return false
-      } else if (crud.form.jobs.length === 0) {
+      } else if (this.jobDatas.length === 0) {
         this.$message({
           message: '岗位不能为空',
           type: 'warning'
         })
         return false
-      } else if (crud.form.roles.length === 0) {
+      } else if (this.roleDatas.length === 0) {
         this.$message({
           message: '角色不能为空',
           type: 'warning'
@@ -418,12 +393,19 @@ export default {
     },
     getSupDepts(deptId) {
       getDeptSuperior(deptId).then(res => {
-        this.depts = res.content.map(function(obj) {
-          if (obj.hasChildren && !obj.children) {
-            obj.children = null
-          }
-          return obj
-        })
+        const date = res.content
+        this.buildDepts(date)
+        this.depts = date
+      })
+    },
+    buildDepts(depts) {
+      depts.forEach(data => {
+        if (data.children) {
+          this.buildDepts(data.children)
+        }
+        if (data.hasChildren && !data.children) {
+          data.children = null
+        }
       })
     },
     // 获取弹窗内部门数据
@@ -493,7 +475,7 @@ export default {
 </script>
 
 <style rel="stylesheet/scss" lang="scss" scoped>
-  /deep/ .vue-treeselect__control, /deep/ .vue-treeselect__placeholder, /deep/ .vue-treeselect__single-value {
+  ::v-deep .vue-treeselect__control,::v-deep .vue-treeselect__placeholder,::v-deep .vue-treeselect__single-value {
     height: 30px;
     line-height: 30px;
   }
